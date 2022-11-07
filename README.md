@@ -63,6 +63,9 @@ grohe_sense:
   refresh_token: "YOUR_VERY_VERY_LONG_REFRESH_TOKEN"
 ```
 
+### Get token programatically
+Please use `get-token.py` and fill username and password to get actual refresh token.
+
 ## Remarks on the "API"
 I have not seen any documentation from Grohe on the API this integration is using, so likely it was only intended for their app. Breaking changes have happened previously, and can easily happen again. I make no promises that I'll maintain this module when that happens.
 
