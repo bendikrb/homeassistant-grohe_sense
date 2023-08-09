@@ -4,70 +4,78 @@ import collections
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-
+from homeassistant.const import (
+    CONF_USERNAME,
+    CONF_PASSWORD,
+)
 from homeassistant.helpers import aiohttp_client
-
-_LOGGER = logging.getLogger(__name__)
-
-DOMAIN = 'grohe_sense'
-
-CONF_REFRESH_TOKEN = 'refresh_token'
+from .const import (
+    DOMAIN,
+    BASE_URL,
+    CONF_REFRESH_TOKEN,
+)
 
 CONFIG_SCHEMA = vol.Schema(
     {
         DOMAIN: vol.Schema({
-            vol.Required(CONF_REFRESH_TOKEN): cv.string,
+            vol.Required(CONF_USERNAME): cv.string,
+            vol.Required(CONF_PASSWORD): cv.string,
+            vol.Optional(CONF_REFRESH_TOKEN): cv.string,
         }),
     },
     extra=vol.ALLOW_EXTRA,
 )
 
-BASE_URL = 'https://idp2-apigw.cloud.grohe.com/v3/iot/'
+_LOGGER = logging.getLogger(__name__)
 
-GROHE_SENSE_TYPE = 101 # Type identifier for the battery powered water detector
-GROHE_SENSE_GUARD_TYPE = 103 # Type identifier for sense guard, the water guard installed on your water pipe
+GroheDevice = collections.namedtuple('GroheDevice', ['location_id', 'room_id', 'appliance_id', 'type', 'name'])
 
-GroheDevice = collections.namedtuple('GroheDevice', ['locationId', 'roomId', 'applianceId', 'type', 'name'])
 
 async def async_setup(hass, config):
     _LOGGER.debug("Loading Grohe Sense")
 
-    await initialize_shared_objects(hass, config.get(DOMAIN).get(CONF_REFRESH_TOKEN))
+    grohe_config = config.get(DOMAIN)
+    await initialize_shared_objects(hass, grohe_config.get(CONF_USERNAME), grohe_config.get(CONF_PASSWORD))
 
     await hass.helpers.discovery.async_load_platform('sensor', DOMAIN, {}, config)
     await hass.helpers.discovery.async_load_platform('switch', DOMAIN, {}, config)
     return True
 
-async def initialize_shared_objects(hass, refresh_token):
+
+async def initialize_shared_objects(hass, username, password):
     session = aiohttp_client.async_get_clientsession(hass)
-    auth_session = OauthSession(session, refresh_token)
+    auth_session = OauthSession(session, username, password)
     devices = []
 
-    hass.data[DOMAIN] = { 'session': auth_session, 'devices': devices }
+    hass.data[DOMAIN] = {'session': auth_session, 'devices': devices}
 
     locations = await auth_session.get(BASE_URL + f'locations')
     for location in locations:
         _LOGGER.debug('Found location %s', location)
-        locationId = location['id']
-        rooms = await auth_session.get(BASE_URL + f'locations/{locationId}/rooms')
+        location_id = location['id']
+        rooms = await auth_session.get(BASE_URL + f'locations/{location_id}/rooms')
         for room in rooms:
             _LOGGER.debug('Found room %s', room)
-            roomId = room['id']
-            appliances = await auth_session.get(BASE_URL + f'locations/{locationId}/rooms/{roomId}/appliances')
+            room_id = room['id']
+            appliances = await auth_session.get(BASE_URL + f'locations/{location_id}/rooms/{room_id}/appliances')
             for appliance in appliances:
                 _LOGGER.debug('Found appliance %s', appliance)
-                applianceId = appliance['appliance_id']
-                devices.append(GroheDevice(locationId, roomId, applianceId, appliance['type'], appliance['name']))
+                appliance_id = appliance['appliance_id']
+                devices.append(GroheDevice(location_id, room_id, appliance_id, appliance['type'], appliance['name']))
+
 
 class OauthException(Exception):
     def __init__(self, error_code, reason):
         self.error_code = error_code
         self.reason = reason
 
+
 class OauthSession:
-    def __init__(self, session, refresh_token):
+    def __init__(self, session, username, password):
         self._session = session
-        self._refresh_token = refresh_token
+        self._refresh_token = None
+        self._username = username
+        self._password = password
         self._access_token = None
         self._fetching_new_token = None
 
@@ -86,14 +94,14 @@ class OauthSession:
 
         self._access_token = None
         self._fetching_new_token = asyncio.Event()
-        data = { 'refresh_token': self._refresh_token }
-        headers = { 'Content-Type': 'application/json' }
+        data = {'refresh_token': self._refresh_token}
+        headers = {'Content-Type': 'application/json'}
 
         refresh_response = await self._http_request(BASE_URL + 'oidc/refresh', 'post', headers=headers, json=data)
-        if not 'access_token' in refresh_response:
-            _LOGGER.error('OAuth token refresh did not yield access token! Got back %s', refresh_response)
-        else:
+        if 'access_token' in refresh_response:
             self._access_token = 'Bearer ' + refresh_response['access_token']
+        else:
+            _LOGGER.error('OAuth token refresh did not yield access token! Got back %s', refresh_response)
 
         self._fetching_new_token.set()
         self._fetching_new_token = None
@@ -105,35 +113,53 @@ class OauthSession:
     async def post(self, url, json, **kwargs):
         return await self._http_request(url, method='post', auth_token=self, json=json, **kwargs)
 
-    async def _http_request(self, url, method='get', auth_token=None, headers={}, **kwargs):
+    async def _http_request(self, url, method='get', auth_token=None, headers=None, **kwargs):
+        if headers is None:
+            headers = {}
         _LOGGER.debug('Making http %s request to %s, headers %s', method, url, headers)
         headers = headers.copy()
         tries = 0
         while True:
-            if auth_token != None:
+            if auth_token is not None:
                 # Cache token so we know which token was used for this request,
                 # so we know if we need to invalidate.
                 token = await auth_token.token()
                 headers['Authorization'] = token
             try:
                 async with self._session.request(method, url, headers=headers, **kwargs) as response:
-                    _LOGGER.debug('Http %s request to %s got response %d', method, url, response.status)
+                    _LOGGER.debug("Http %s request to %s got response %d", method, url, response.status)
                     if response.status in (200, 201):
                         return await response.json()
                     elif response.status == 401:
-                        if auth_token != None:
-                            _LOGGER.debug('Request to %s returned status %d, refreshing auth token', url, response.status)
+                        if auth_token is not None:
+                            _LOGGER.debug("Request to %s returned status %d, refreshing auth token", url,
+                                          response.status)
                             token = await auth_token.token(token)
                         else:
-                            _LOGGER.error('Grohe sense refresh token is invalid (or expired), please update your configuration with a new refresh token')
+                            _LOGGER.error(
+                                "Grohe sense refresh token is invalid (or expired), please update your configuration "
+                                "with a new refresh token")
                             raise OauthException(response.status, await response.text())
                     else:
-                        _LOGGER.debug('Request to %s returned status %d, %s', url, response.status, await response.text())
+                        _LOGGER.debug("Request to %s returned status %d, %s", url, response.status,
+                                      await response.text())
             except OauthException as oe:
                 raise
             except Exception as e:
                 _LOGGER.debug('Exception for http %s request to %s: %s', method, url, e)
 
             tries += 1
-            await asyncio.sleep(min(600, 2**tries))
+            await asyncio.sleep(min(600, 2 ** tries))
 
+
+class GroheSenseUtil:
+    _appliance_id = None
+    _room_id = None
+    _location_id = None
+
+    def get_url(self, endpoint):
+        return "{base}{paths}{endpoint}".format(
+            base=BASE_URL,
+            paths=f"locations/{self._location_id}/rooms/{self._room_id}/appliances/{self._appliance_id}/",
+            endpoint=endpoint,
+        )
