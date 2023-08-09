@@ -5,6 +5,8 @@ DOMAIN = 'grohe_sense'
 CONF_REFRESH_TOKEN = 'refresh_token'
 
 BASE_URL = 'https://idp2-apigw.cloud.grohe.com/v3/iot/'
+LOGIN_URL = f"{BASE_URL}oidc/login"
+REFRESH_URL = f"{BASE_URL}oidc/refresh"
 
 GROHE_SENSE_TYPE = 101  # Type identifier for the battery powered water detector
 GROHE_SENSE_GUARD_TYPE = 103  # Type identifier for sense guard, the water guard installed on your water pipe
