@@ -1,11 +1,11 @@
 {
 	"domain": "grohe_sense",
 	"name": "Grohe Sense",
+	"version": "v0.1.0",
 	"documentation": "https://github.com/gkreitz/homeassistant-grohe_sense",
 	"issue_tracker": "https://github.com/gkreitz/homeassistant-grohe_sense/issues",
 	"iot_class": "cloud_polling",
 	"dependencies": [],
 	"requirements": [],
-	"codeowners": ["@gkreitz"],
-	"version": "v0.1.0"
+	"codeowners": ["@gkreitz"]
 }
