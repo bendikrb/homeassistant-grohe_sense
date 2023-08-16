@@ -71,11 +71,11 @@ async def initialize_shared_objects(hass, username, password):
         for room in rooms:
             _LOGGER.debug('Found room %s', room)
             room_id = room['id']
-            appliances = await auth_session.get(BASE_URL + f'locations/{location_id}/rooms/{room_id}/appliances')
-            for appliance in appliances:
-                _LOGGER.debug('Found appliance %s', appliance)
-                appliance_id = appliance['appliance_id']
-                devices.append(GroheDevice(location_id, room_id, appliance_id, appliance['type'], appliance['name']))
+            if appliances := await auth_session.get(BASE_URL + f'locations/{location_id}/rooms/{room_id}/appliances'):
+                for appliance in appliances:
+                    _LOGGER.debug('Found appliance %s', appliance)
+                    appliance_id = appliance['appliance_id']
+                    devices.append(GroheDevice(location_id, room_id, appliance_id, appliance['type'], appliance['name']))
 
     return auth_session, devices
 
@@ -203,10 +203,11 @@ class OauthSession:
                             raise OauthException(response.status, await response.text())
                     else:
                         _LOGGER.debug("Request to %s returned status %d, %s", url, response.status,
-                                      await response.text())
+                                      await response.json())
+                        return None
             except OauthException as oe:
                 raise
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 _LOGGER.debug('Exception for http %s request to %s: %s', method, url, e)
 
             tries += 1
